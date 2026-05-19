@@ -13,11 +13,11 @@ also match by base file name even when their extensions are different.
 
 Mode 2: Append missing files.
 It crawls both folder trees and copies source files into the target folder only when
-no file with the same name exists anywhere in the target folder tree. Missing files
-are copied into the target folder using their relative path from the source folder,
-with "-Imported" appended to each subfolder name. DDS and PNG files can also match
-by base file name even when their extensions are different; in that case, the
-existing matching target texture is removed before the source texture is appended.
+no matching file exists anywhere in the target folder tree. DDS and PNG files match
+by base file name even when their extensions are different, so append mode will not
+add a PNG when a same-base DDS already exists, or vice versa. Missing files are
+copied into the target folder using their relative path from the source folder,
+with "-Imported" appended to each subfolder name.
 
 If the source tree contains duplicate file names, the script reports them and asks
 which one should be used for that name in replacement mode.
@@ -263,15 +263,12 @@ function New-PlannedCopy {
         [System.IO.FileInfo]$SourceFile,
 
         [Parameter(Mandatory)]
-        [string]$Destination,
-
-        [System.IO.FileInfo[]]$TargetsToRemove = @()
+        [string]$Destination
     )
 
     [PSCustomObject]@{
         Source = $SourceFile
         Destination = $Destination
-        TargetsToRemove = $TargetsToRemove
     }
 }
 
@@ -374,8 +371,6 @@ function Invoke-AppendMissingFiles {
 
     $plannedCopies = @(
         foreach ($sourceFile in $SourceFiles) {
-            $targetsToRemove = @()
-
             if ($targetNames.ContainsKey($sourceFile.Name)) {
                 continue
             }
@@ -384,30 +379,23 @@ function Invoke-AppendMissingFiles {
                 $matchKey = Get-ReplacementMatchKey -File $sourceFile
 
                 if ($targetTexturesByKey.ContainsKey($matchKey)) {
-                    $targetsToRemove = @($targetTexturesByKey[$matchKey])
+                    continue
                 }
             }
 
             $destinationPath = Get-ImportedDestinationPath -SourceFolder $SourceFolder -TargetFolder $TargetFolder -SourceFile $sourceFile
-            New-PlannedCopy -SourceFile $sourceFile -Destination $destinationPath -TargetsToRemove ([System.IO.FileInfo[]]$targetsToRemove)
+            New-PlannedCopy -SourceFile $sourceFile -Destination $destinationPath
         }
     )
 
     if ($plannedCopies.Count -eq 0) {
-        Write-Host 'No source files were missing from the destination by exact file name. Nothing to append.'
+        Write-Host 'No source files were missing from the destination. Nothing to append.'
         return
     }
 
     Write-Host ''
     Write-Host "Found $($plannedCopies.Count) source file(s) to append:"
     foreach ($plannedCopy in $plannedCopies) {
-        if ($plannedCopy.TargetsToRemove.Count -gt 0) {
-            Write-Host 'Remove existing target texture(s):'
-            foreach ($targetToRemove in $plannedCopy.TargetsToRemove) {
-                Write-Host "  $($targetToRemove.FullName)"
-            }
-        }
-
         Write-Host "Source:      $($plannedCopy.Source.FullName)"
         Write-Host "Destination: $($plannedCopy.Destination)"
         Write-Host ''
@@ -420,25 +408,12 @@ function Invoke-AppendMissingFiles {
     }
 
     $copied = 0
-    $removed = 0
     $failed = 0
-    $removedTargetPaths = @{}
 
     foreach ($plannedCopy in $plannedCopies) {
         $destinationFolder = Split-Path -Path $plannedCopy.Destination -Parent
 
         try {
-            foreach ($targetToRemove in $plannedCopy.TargetsToRemove) {
-                if ($removedTargetPaths.ContainsKey($targetToRemove.FullName)) {
-                    continue
-                }
-
-                Remove-Item -LiteralPath $targetToRemove.FullName -Force
-                $removedTargetPaths[$targetToRemove.FullName] = $true
-                $removed++
-                Write-Host "Removed conflicting target texture: $($targetToRemove.FullName)"
-            }
-
             if (-not (Test-Path -LiteralPath $destinationFolder -PathType Container)) {
                 New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
             }
@@ -454,7 +429,7 @@ function Invoke-AppendMissingFiles {
     }
 
     Write-Host ''
-    Write-Host "Done. Removed: $removed. Copied: $copied. Failed: $failed."
+    Write-Host "Done. Copied: $copied. Failed: $failed."
     Restart-ExplorerIfRequested
 }
 

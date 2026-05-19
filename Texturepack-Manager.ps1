@@ -155,24 +155,44 @@ function Test-PathIsInsideFolder {
     }
 }
 
-function Close-ExplorerWindowsForFoldersIfRequested {
+function Clear-ComObjectReference {
+    param(
+        [object]$ComObject
+    )
+
+    if ($null -eq $ComObject) {
+        return
+    }
+
+    try {
+        if ([System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+            [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ComObject) | Out-Null
+        }
+    }
+    catch {
+        # COM cleanup is best-effort; merge behavior should not fail if cleanup cannot release a reference.
+    }
+}
+
+function Get-MatchingExplorerWindowPaths {
     param(
         [Parameter(Mandatory)]
         [string[]]$Folders
     )
 
+    $shell = $null
+    $explorerWindows = $null
+    $matchingPaths = New-Object System.Collections.Generic.List[string]
+
     try {
         $shell = New-Object -ComObject Shell.Application
-        $explorerWindows = @($shell.Windows())
-    }
-    catch {
-        Write-Warning "Could not inspect File Explorer windows: $($_.Exception.Message)"
-        return
-    }
+        $explorerWindows = $shell.Windows()
 
-    $matchingWindows = @(
-        foreach ($window in $explorerWindows) {
+        for ($i = 0; $i -lt $explorerWindows.Count; $i++) {
+            $window = $null
+
             try {
+                $window = $explorerWindows.Item($i)
                 $folderPath = $window.Document.Folder.Self.Path
 
                 if ([string]::IsNullOrWhiteSpace($folderPath)) {
@@ -181,10 +201,10 @@ function Close-ExplorerWindowsForFoldersIfRequested {
 
                 foreach ($folder in $Folders) {
                     if (Test-PathIsInsideFolder -Path $folderPath -Folder $folder) {
-                        [PSCustomObject]@{
-                            Window = $window
-                            Path = $folderPath
+                        if (-not $matchingPaths.Contains($folderPath)) {
+                            $matchingPaths.Add($folderPath)
                         }
+
                         break
                     }
                 }
@@ -192,17 +212,91 @@ function Close-ExplorerWindowsForFoldersIfRequested {
             catch {
                 continue
             }
+            finally {
+                Clear-ComObjectReference -ComObject $window
+            }
         }
+    }
+    catch {
+        Write-Warning "Could not inspect File Explorer windows: $($_.Exception.Message)"
+    }
+    finally {
+        Clear-ComObjectReference -ComObject $explorerWindows
+        Clear-ComObjectReference -ComObject $shell
+        [gc]::Collect()
+        [gc]::WaitForPendingFinalizers()
+    }
+
+    return @($matchingPaths)
+}
+
+function Close-MatchingExplorerWindows {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Folders
     )
 
-    if ($matchingWindows.Count -eq 0) {
+    $shell = $null
+    $explorerWindows = $null
+
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        $explorerWindows = $shell.Windows()
+
+        for ($i = $explorerWindows.Count - 1; $i -ge 0; $i--) {
+            $window = $null
+
+            try {
+                $window = $explorerWindows.Item($i)
+                $folderPath = $window.Document.Folder.Self.Path
+
+                if ([string]::IsNullOrWhiteSpace($folderPath)) {
+                    continue
+                }
+
+                foreach ($folder in $Folders) {
+                    if (Test-PathIsInsideFolder -Path $folderPath -Folder $folder) {
+                        $window.Quit()
+                        Write-Host "Closed Explorer window: $folderPath"
+                        break
+                    }
+                }
+            }
+            catch {
+                continue
+            }
+            finally {
+                Clear-ComObjectReference -ComObject $window
+            }
+        }
+    }
+    catch {
+        Write-Warning "Could not close File Explorer windows: $($_.Exception.Message)"
+    }
+    finally {
+        Clear-ComObjectReference -ComObject $explorerWindows
+        Clear-ComObjectReference -ComObject $shell
+        [gc]::Collect()
+        [gc]::WaitForPendingFinalizers()
+    }
+}
+
+function Close-ExplorerWindowsForFoldersIfRequested {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Folders
+    )
+
+    $matchingPaths = @(Get-MatchingExplorerWindowPaths -Folders $Folders)
+
+    if ($matchingPaths.Count -eq 0) {
         return
     }
 
     Write-Host ''
     Write-Host 'The following File Explorer window(s) are open inside the selected destination folder:'
-    foreach ($matchingWindow in $matchingWindows) {
-        Write-Host "  $($matchingWindow.Path)"
+    foreach ($matchingPath in $matchingPaths) {
+        Write-Host "  $matchingPath"
     }
 
     Write-Host ''
@@ -214,15 +308,7 @@ function Close-ExplorerWindowsForFoldersIfRequested {
         return
     }
 
-    foreach ($matchingWindow in $matchingWindows) {
-        try {
-            $matchingWindow.Window.Quit()
-            Write-Host "Closed Explorer window: $($matchingWindow.Path)"
-        }
-        catch {
-            Write-Warning "Could not close Explorer window '$($matchingWindow.Path)': $($_.Exception.Message)"
-        }
-    }
+    Close-MatchingExplorerWindows -Folders $Folders
 }
 
 function Get-FixedMapFileName {
@@ -574,6 +660,8 @@ function Invoke-ReplaceMatchingFiles {
         return
     }
 
+    Close-ExplorerWindowsForFoldersIfRequested -Folders @($TargetFolder)
+
     $replaced = 0
     $added = 0
     $failed = 0
@@ -693,6 +781,8 @@ function Invoke-AppendMissingFiles {
         return
     }
 
+    Close-ExplorerWindowsForFoldersIfRequested -Folders @($TargetFolder)
+
     $copied = 0
     $failed = 0
 
@@ -734,8 +824,6 @@ $targetFolder = Read-FolderPath -Prompt 'Enter the destination folder (This can 
 if ($sourceFolder -eq $targetFolder) {
     throw 'Source and target folders must be different.'
 }
-
-Close-ExplorerWindowsForFoldersIfRequested -Folders @($targetFolder)
 
 Write-Host ''
 Write-Host "Scanning source folder: $sourceFolder"

@@ -5,19 +5,19 @@ Merges files from a source folder tree into a target folder tree.
 .DESCRIPTION
 The script prompts for a merge mode, source folder, and target folder.
 
-Mode 1: Replace matching files.
-It crawls the source folder recursively, builds a lookup by file name, then crawls
-the target folder recursively. Whenever a target file has the same file name as a
-source file, the source file is copied over the target file. DDS and PNG files can
-also match by base file name even when their extensions are different.
-
-Mode 2: Append missing files.
+Mode 1: Append missing files.
 It crawls both folder trees and copies source files into the target folder only when
 no matching file exists anywhere in the target folder tree. DDS and PNG files match
 by base file name even when their extensions are different, so append mode will not
 add a PNG when a same-base DDS already exists, or vice versa. Missing files are
 copied into the target folder using their relative path from the source folder,
 with "-Imported" appended to each subfolder name.
+
+Mode 2: Replace matching files.
+It crawls the source folder recursively, builds a lookup by file name, then crawls
+the target folder recursively. Whenever a target file has the same file name as a
+source file, the source file is copied over the target file. DDS and PNG files can
+also match by base file name even when their extensions are different.
 
 If the source tree contains duplicate file names, the script reports them and asks
 which one should be used for that name in replacement mode.
@@ -27,6 +27,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $excludedFileNames = @(
+    # These are two incorrect texture files that Henriko left in the 1080p version of his pack. They're the "4K" and "4K Textures by Henriko" textures from the title screen. Ignoring them leaves it saying "HD" properly.
     'tex1_608x100_0c1c70378fb8cb46_6.dds',
     'tex1_224x29_175aea04816c34a7_2.dds'
 )
@@ -85,15 +86,15 @@ function Select-SourceFile {
 function Read-MergeMode {
     Write-Host ''
     Write-Host 'Select merge mode:'
-    Write-Host "[1] Replace matching files - Overwrite one pack's textures with another pack's for a specific set of textures. (Ex: Replace TPHD pack textures with Henriko UI textures.)"
-    Write-Host "[2] Append missing files - Add missing textures to another pack."
+    Write-Host "[1] Append missing files - Add missing textures to another pack."
+    Write-Host "[2] Replace matching files - Overwrite one pack's textures with another pack's for a specific set of textures. (Ex: Replace TPHD UI textures with Henriko UI textures.)"
 
     while ($true) {
         $choice = Read-Host 'Enter 1 or 2'
 
         switch ($choice.Trim()) {
-            '1' { return 'Replace' }
-            '2' { return 'AppendMissing' }
+            '1' { return 'AppendMode' }
+            '2' { return 'ReplaceMode' }
             default { Write-Warning 'Invalid choice. Please enter 1 or 2.' }
         }
     }
@@ -308,18 +309,18 @@ function Invoke-ReplaceMatchingFiles {
     )
 
     $sourceByName = Get-SourceLookupForReplacement -SourceFiles $SourceFiles
-    $matches = @(
+    $foundMatches = @(
         $TargetFiles | Where-Object { Test-ReplacementMatchExists -TargetFile $_ -SourceLookup $sourceByName }
     )
 
-    if ($matches.Count -eq 0) {
+    if ($foundMatches.Count -eq 0) {
         Write-Host 'No target files matched source file names. Nothing to replace.'
         return
     }
 
     Write-Host ''
-    Write-Host "Found $($matches.Count) target file(s) to replace:"
-    foreach ($targetFile in $matches) {
+    Write-Host "Found $($foundMatches.Count) target file(s) to replace:"
+    foreach ($targetFile in $foundMatches) {
         $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
         $destinationPath = Get-ReplacementDestinationPath -SourceFile $sourceFile -TargetFile $targetFile
         Write-Host "Target: $($targetFile.FullName)"
@@ -327,13 +328,13 @@ function Invoke-ReplaceMatchingFiles {
 
         if ($destinationPath -ne $targetFile.FullName) {
             Write-Host "Destination: $destinationPath"
-            Write-Host 'Action: Remove target file, then copy source using source extension.'
+            Write-Host 'Same texture with different extension detected. Texture will be replaced with new one with updated extension.'
         }
 
         Write-Host ''
     }
 
-    $confirmation = Read-Host "Replace these $($matches.Count) file(s)? Type YES to continue"
+    $confirmation = Read-Host "Replace these $($foundMatches.Count) file(s)? Type YES to continue"
     if ($confirmation -ne 'YES') {
         Write-Host 'Cancelled. No files were changed.'
         return
@@ -342,7 +343,7 @@ function Invoke-ReplaceMatchingFiles {
     $replaced = 0
     $failed = 0
 
-    foreach ($targetFile in $matches) {
+    foreach ($targetFile in $foundMatches) {
         $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
         $destinationPath = Get-ReplacementDestinationPath -SourceFile $sourceFile -TargetFile $targetFile
 
@@ -433,7 +434,7 @@ function Invoke-AppendMissingFiles {
         Write-Host ''
     }
 
-    $confirmation = Read-Host "Apply these $($plannedCopies.Count) append operation(s)? Type YES to continue"
+    $confirmation = Read-Host "Apply these $($plannedCopies.Count) additons? Type YES to continue"
     if ($confirmation -ne 'YES') {
         Write-Host 'Cancelled. No files were changed.'
         return
@@ -452,30 +453,30 @@ function Invoke-AppendMissingFiles {
 
             Copy-Item -LiteralPath $plannedCopy.Source.FullName -Destination $plannedCopy.Destination -Force
             $copied++
-            Write-Host "Copied: $($plannedCopy.Destination)"
+            Write-Host "Added: $($plannedCopy.Destination)"
         }
         catch {
             $failed++
-            Write-Warning "Failed to copy '$($plannedCopy.Source.FullName)': $($_.Exception.Message)"
+            Write-Warning "Failed to add '$($plannedCopy.Source.FullName)': $($_.Exception.Message)"
         }
     }
 
     Write-Host ''
-    Write-Host "Done. Copied: $copied. Failed: $failed."
+    Write-Host "Done. Added: $copied. Failed: $failed."
     Restart-ExplorerIfRequested
 }
 
-Write-Warning "This script can overwrite files when running in replace mode. Make sure you have backups of any important files before proceeding. This is an AI generated script that HAS been reviewed and tested. Review it yourself to be sure you are comfortable running it. I am not responsible for any damage or loss of data that may occur from running this script."
+Write-Warning "This script can overwrite files when running in replace mode. Make sure you have backups of any important files before proceeding. The base script was AI generated and then improved upon and tested. Review it yourself to be sure you are comfortable running it. I am not responsible for any damage or loss of data that may occur from running this script."
 
 write-host ''
-Write-Host 'You will be prompted for a source and destination folder momentarily. The source should be the folder containing the textures you want to use for replacement. The destination should be the folder containing the textures you want to have replaced. Ex: You want to copy Henriko UI into TPHD pack. Henriko UI folder would be source, TPHD pack would be destination. Note: technically this script can be used for any files, not just textures, but it was designed with texture pack merging in mind so the prompts and warnings are worded with that use case in mind.'
+Write-Host 'You will be prompted for a source and destination folder momentarily. The source should be the folder containing the textures you want to use for replacement. The destination should be the folder containing the textures you want to have replaced. Ex: You want to copy Henriko UI into TPHD pack. Henriko UI folder would be source, TPHD pack would be destination.'
 
 write-host ''
 $mergeMode = Read-MergeMode
 
 write-host ''
-$sourceFolder = Read-FolderPath -Prompt 'Enter the source folder (Make sure to select the subfolder for the textures you want to have get replaced. NOT the main parent folder unless you want to replace the entire pack.)'
-$targetFolder = Read-FolderPath -Prompt 'Enter the destination folder (This can be the parent folder for the target pack as it will only replace files that have the same name as those in the source folder regardless of destination folder.)'
+$sourceFolder = Read-FolderPath -Prompt 'Enter the source folder (Either the GZ2 folder of a pack or a subfolder of it for specific textures.)'
+$targetFolder = Read-FolderPath -Prompt 'Enter the destination folder (This can be the parent folder for the target pack as it will only replace files that have the same name as those in the source folder regardless of destination folder or add new textures to folders with -Imported appended.)'
 
 if ($sourceFolder -eq $targetFolder) {
     throw 'Source and target folders must be different.'
@@ -505,10 +506,10 @@ Write-Host "Scanning target folder: $targetFolder"
 $targetFiles = @(Get-ChildItem -LiteralPath $targetFolder -File -Recurse)
 
 switch ($mergeMode) {
-    'Replace' {
+    'ReplaceMode' {
         Invoke-ReplaceMatchingFiles -SourceFolder $sourceFolder -TargetFolder $targetFolder -SourceFiles $sourceFiles -TargetFiles $targetFiles
     }
-    'AppendMissing' {
+    'AppendMode' {
         Invoke-AppendMissingFiles -SourceFolder $sourceFolder -TargetFolder $targetFolder -SourceFiles $sourceFiles -TargetFiles $targetFiles
     }
 }

@@ -334,6 +334,7 @@ function Invoke-ReplaceMatchingFiles {
 
     Write-Host ''
     Write-Host "Done. Replaced: $replaced. Failed: $failed."
+    Restart-ExplorerIfRequested
 }
 
 function Invoke-AppendMissingFiles {
@@ -374,25 +375,17 @@ function Invoke-AppendMissingFiles {
     $plannedCopies = @(
         foreach ($sourceFile in $SourceFiles) {
             $targetsToRemove = @()
-            $shouldCopy = $false
+
+            if ($targetNames.ContainsKey($sourceFile.Name)) {
+                continue
+            }
 
             if (Test-DdsOrPngFile -File $sourceFile) {
                 $matchKey = Get-ReplacementMatchKey -File $sourceFile
 
                 if ($targetTexturesByKey.ContainsKey($matchKey)) {
                     $targetsToRemove = @($targetTexturesByKey[$matchKey])
-                    $shouldCopy = $true
                 }
-                elseif (-not $targetNames.ContainsKey($sourceFile.Name)) {
-                    $shouldCopy = $true
-                }
-            }
-            elseif (-not $targetNames.ContainsKey($sourceFile.Name)) {
-                $shouldCopy = $true
-            }
-
-            if (-not $shouldCopy) {
-                continue
             }
 
             $destinationPath = Get-ImportedDestinationPath -SourceFolder $SourceFolder -TargetFolder $TargetFolder -SourceFile $sourceFile
@@ -401,7 +394,7 @@ function Invoke-AppendMissingFiles {
     )
 
     if ($plannedCopies.Count -eq 0) {
-        Write-Host 'No source files were missing from the destination and no DDS/PNG texture conflicts were found. Nothing to append.'
+        Write-Host 'No source files were missing from the destination by exact file name. Nothing to append.'
         return
     }
 

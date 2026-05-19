@@ -2,11 +2,11 @@
 
 Welcome to helping the modding community. This is a team effort and the goal is to improve things for everyone, not just one person or team. This pack manager is being built around creating and managing Dusklight texture packs and applying known patches . 
 
-I'd love the help and what helps the most are things like bug reports, edge cases I haven't thought of, documentation help, and code changes (as long as you understand them).
+I'd love some help and what helps the most are things like bug reports, edge cases I haven't thought of, documentation help, and code changes (as long as you understand them).
 
 ## Project Direction
 
-The current script is the first of multiple  milestones leading toward a full-blown texture pack manager/converter/previewer. Some features may be intentionally kept out of the script if they make more sense in a future GUI workflow as that's the intended direction once core script functionatlity is finished/finalized and intended pack output structures are decided. The biggest thing I'll need help with is when it comes to making the GUI. I'm an enterprise tooling/automation engineer by trade so scripting isn't an issue but I have zero experience with graphic design/UX design. I can come up with decent layouts but have no clue how to implement them outside of basic .NET windows. People that can helpe make a nice GUI to leverage the backend script/functions will be especially welcome.
+The current script is the first of multiple  milestones leading toward a full-blown texture pack manager/converter/previewer. Some features may be intentionally kept out of the script if they make more sense in a future GUI workflow as that's the intended direction once core script functionatlity is finished/finalized and intended pack output structures are decided. The biggest thing I'll need help with is when it comes to making the GUI. I'm an enterprise tooling/automation engineer by trade so scripting isn't an issue but I have zero experience with graphic design/UX design. I can come up with decent layouts but have no clue how to implement them outside of basic .NET windows. People that can help make a nice GUI to leverage the backend script/functions will be especially welcome.
 
 ## Intended Milestones
 ### Milestone 1: Core Functionality - 90% Complete - Core functionality present and working as intended. Looking for additional ways to polish/known pack fixes to implement
@@ -25,7 +25,7 @@ The current script is the first of multiple  milestones leading toward a full-bl
 ### Milestone 2: Output Format Finalization - 25% Complete - Have basics sorted for things like Pack\GZ2\Subfolder tree but need to finalize/standardize multiple other things 
 - Two output styles:
   - Manager/Dusklight-friendly prioritized packs (better for Dusklight, horrible for storage size as more packs get added)
-  - Storage-friendly merged single pack (better for users that are tight on storage but will break Dusklight's priority system and make individual pack selection inside of Dusk (once they eventually add that) impossible)
+  - Storage-friendly merged single pack (better for users that are tight on storage but will break Dusklight's priority system and make individual pack selection inside of Dusk, once they eventually add that, impossible)
 - Standardize naming conventions (things like GZ2 for root of pack folder etc)
 - Decide priority prefix format (Most likely 010_, 020_, 030_., etc so it fits with Dusklight's current model and what will likely make most sense and leave room to insert additional packs later in-between)
 - Define safe folder-name rules to prevent any issues
@@ -39,7 +39,7 @@ The current script is the first of multiple  milestones leading toward a full-bl
 ### Milestone 4: Build Planning Improvements - 75% Complete - This is mostly just improvements to what I already do with showing previews to the user etc. Will be more relevant once multi-pack support is added so needs to be 100% here before moving on
 - Present detection summary and show intended layout to user before pack compliation
 - Shift toward a “plan full pack structure first, execute once finalized” flow (pretty much already is but ensure it's ready to account for Milestone 5 and adding multiple packs at once in one run
-- Track all additions, replacements, skipped files, conflicts, and patches in one place for easy summary collection
+- Track all additions, replacements, skipped files, conflicts, and patches in one place for easy summary collection/presentation
 - Improve logic where needed to make it easier to reuse in the future GUI version
 
 ### Milestone 5: Multi-Pack Compilation - 0% Complete
@@ -80,4 +80,4 @@ You retain copyright to your own contributions, but you grant the project permis
 
 ## AI-Generated Contributions
 
-It's 2026, people use AI. That being said, if you're using it, it should be to help validate your thinking and be a sounding board for ideas/debugging. Do NOT expect submissions that are clearly fully AI generated to be accepted. Contributors are expected to understand, review, and test anything they get from any AI and they should be ready to be questioned on it and be able to explain what the code is doing without saying "uhhhh I have no clue..."
+It's 2026, people use AI. That being said, if you're using it, it should be to help validate your thinking and be a sounding board for ideas, explainng things so you understand more completely, or debugging. Think "unpaid, 24/7 reserach assistant". Do NOT expect submissions that are clearly fully AI generated to be accepted. Contributors are expected to understand, review, and test anything they get from any AI and they should be ready to be questioned on it and be able to explain what the code is doing without saying "uhhhh I have no clue..."

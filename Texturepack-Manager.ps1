@@ -8,13 +8,16 @@ The script prompts for a merge mode, source folder, and target folder.
 Mode 1: Replace matching files.
 It crawls the source folder recursively, builds a lookup by file name, then crawls
 the target folder recursively. Whenever a target file has the same file name as a
-source file, the source file is copied over the target file.
+source file, the source file is copied over the target file. DDS and PNG files can
+also match by base file name even when their extensions are different.
 
 Mode 2: Append missing files.
 It crawls both folder trees and copies source files into the target folder only when
 no file with the same name exists anywhere in the target folder tree. Missing files
 are copied into the target folder using their relative path from the source folder,
-with "-Imported" appended to each subfolder name.
+with "-Imported" appended to each subfolder name. DDS and PNG files can also match
+by base file name even when their extensions are different; in that case, the
+existing matching target texture is removed before the source texture is appended.
 
 If the source tree contains duplicate file names, the script reports them and asks
 which one should be used for that name in replacement mode.
@@ -117,25 +120,88 @@ function Restart-ExplorerIfRequested {
     }
 }
 
-function Get-SourceLookupByName {
+function Get-ReplacementMatchKey {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$File
+    )
+
+    $extension = $File.Extension.ToLowerInvariant()
+
+    if ($extension -eq '.dds' -or $extension -eq '.png') {
+        return [System.IO.Path]::GetFileNameWithoutExtension($File.Name)
+    }
+
+    return $File.Name
+}
+
+function Test-DdsOrPngFile {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$File
+    )
+
+    $extension = $File.Extension.ToLowerInvariant()
+    return ($extension -eq '.dds' -or $extension -eq '.png')
+}
+
+function Get-SourceLookupForReplacement {
     param(
         [Parameter(Mandatory)]
         [System.IO.FileInfo[]]$SourceFiles
     )
 
-    $sourceByName = @{}
-    $SourceFiles |
-        Group-Object -Property Name |
-        ForEach-Object {
-            if ($_.Count -eq 1) {
-                $sourceByName[$_.Name] = $_.Group[0]
-            }
-            else {
-                $sourceByName[$_.Name] = Select-SourceFile -FileName $_.Name -Files ([System.IO.FileInfo[]]$_.Group)
-            }
+    $sourceGroupsByKey = @{}
+
+    foreach ($sourceFile in $SourceFiles) {
+        $matchKey = Get-ReplacementMatchKey -File $sourceFile
+
+        if (-not $sourceGroupsByKey.ContainsKey($matchKey)) {
+            $sourceGroupsByKey[$matchKey] = @()
         }
 
-    return $sourceByName
+        $sourceGroupsByKey[$matchKey] = @($sourceGroupsByKey[$matchKey] + $sourceFile)
+    }
+
+    $sourceByKey = @{}
+    foreach ($matchKey in $sourceGroupsByKey.Keys) {
+        $sourceGroup = @($sourceGroupsByKey[$matchKey])
+
+        if ($sourceGroup.Count -eq 1) {
+            $sourceByKey[$matchKey] = $sourceGroup[0]
+        }
+        else {
+            $sourceByKey[$matchKey] = Select-SourceFile -FileName $matchKey -Files ([System.IO.FileInfo[]]$sourceGroup)
+        }
+    }
+
+    return $sourceByKey
+}
+
+function Get-SourceFileForReplacement {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$TargetFile,
+
+        [Parameter(Mandatory)]
+        [hashtable]$SourceLookup
+    )
+
+    $matchKey = Get-ReplacementMatchKey -File $TargetFile
+    return $SourceLookup[$matchKey]
+}
+
+function Test-ReplacementMatchExists {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$TargetFile,
+
+        [Parameter(Mandatory)]
+        [hashtable]$SourceLookup
+    )
+
+    $matchKey = Get-ReplacementMatchKey -File $TargetFile
+    return $SourceLookup.ContainsKey($matchKey)
 }
 
 function Get-RelativePathFromFolder {
@@ -197,12 +263,15 @@ function New-PlannedCopy {
         [System.IO.FileInfo]$SourceFile,
 
         [Parameter(Mandatory)]
-        [string]$Destination
+        [string]$Destination,
+
+        [System.IO.FileInfo[]]$TargetsToRemove = @()
     )
 
     [PSCustomObject]@{
         Source = $SourceFile
         Destination = $Destination
+        TargetsToRemove = $TargetsToRemove
     }
 }
 
@@ -221,9 +290,9 @@ function Invoke-ReplaceMatchingFiles {
         [System.IO.FileInfo[]]$TargetFiles
     )
 
-    $sourceByName = Get-SourceLookupByName -SourceFiles $SourceFiles
+    $sourceByName = Get-SourceLookupForReplacement -SourceFiles $SourceFiles
     $matches = @(
-        $TargetFiles | Where-Object { $sourceByName.ContainsKey($_.Name) }
+        $TargetFiles | Where-Object { Test-ReplacementMatchExists -TargetFile $_ -SourceLookup $sourceByName }
     )
 
     if ($matches.Count -eq 0) {
@@ -234,7 +303,7 @@ function Invoke-ReplaceMatchingFiles {
     Write-Host ''
     Write-Host "Found $($matches.Count) target file(s) to replace:"
     foreach ($targetFile in $matches) {
-        $sourceFile = $sourceByName[$targetFile.Name]
+        $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
         Write-Host "Target: $($targetFile.FullName)"
         Write-Host "Source: $($sourceFile.FullName)"
         Write-Host ''
@@ -250,7 +319,7 @@ function Invoke-ReplaceMatchingFiles {
     $failed = 0
 
     foreach ($targetFile in $matches) {
-        $sourceFile = $sourceByName[$targetFile.Name]
+        $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
 
         try {
             Copy-Item -LiteralPath $sourceFile.FullName -Destination $targetFile.FullName -Force
@@ -265,7 +334,6 @@ function Invoke-ReplaceMatchingFiles {
 
     Write-Host ''
     Write-Host "Done. Replaced: $replaced. Failed: $failed."
-    Restart-ExplorerIfRequested
 }
 
 function Invoke-AppendMissingFiles {
@@ -288,43 +356,96 @@ function Invoke-AppendMissingFiles {
         $targetNames[$targetFile.Name] = $true
     }
 
-    $missingSourceFiles = @(
-        $SourceFiles | Where-Object { -not $targetNames.ContainsKey($_.Name) }
-    )
+    $targetTexturesByKey = @{}
+    foreach ($targetFile in $TargetFiles) {
+        if (-not (Test-DdsOrPngFile -File $targetFile)) {
+            continue
+        }
 
-    if ($missingSourceFiles.Count -eq 0) {
-        Write-Host 'No source files were missing from the destination by file name. Nothing to append.'
-        return
+        $matchKey = Get-ReplacementMatchKey -File $targetFile
+
+        if (-not $targetTexturesByKey.ContainsKey($matchKey)) {
+            $targetTexturesByKey[$matchKey] = @()
+        }
+
+        $targetTexturesByKey[$matchKey] = @($targetTexturesByKey[$matchKey] + $targetFile)
     }
 
     $plannedCopies = @(
-        foreach ($sourceFile in $missingSourceFiles) {
+        foreach ($sourceFile in $SourceFiles) {
+            $targetsToRemove = @()
+            $shouldCopy = $false
+
+            if (Test-DdsOrPngFile -File $sourceFile) {
+                $matchKey = Get-ReplacementMatchKey -File $sourceFile
+
+                if ($targetTexturesByKey.ContainsKey($matchKey)) {
+                    $targetsToRemove = @($targetTexturesByKey[$matchKey])
+                    $shouldCopy = $true
+                }
+                elseif (-not $targetNames.ContainsKey($sourceFile.Name)) {
+                    $shouldCopy = $true
+                }
+            }
+            elseif (-not $targetNames.ContainsKey($sourceFile.Name)) {
+                $shouldCopy = $true
+            }
+
+            if (-not $shouldCopy) {
+                continue
+            }
+
             $destinationPath = Get-ImportedDestinationPath -SourceFolder $SourceFolder -TargetFolder $TargetFolder -SourceFile $sourceFile
-            New-PlannedCopy -SourceFile $sourceFile -Destination $destinationPath
+            New-PlannedCopy -SourceFile $sourceFile -Destination $destinationPath -TargetsToRemove ([System.IO.FileInfo[]]$targetsToRemove)
         }
     )
 
+    if ($plannedCopies.Count -eq 0) {
+        Write-Host 'No source files were missing from the destination and no DDS/PNG texture conflicts were found. Nothing to append.'
+        return
+    }
+
     Write-Host ''
-    Write-Host "Found $($missingSourceFiles.Count) source file(s) missing from the destination:"
+    Write-Host "Found $($plannedCopies.Count) source file(s) to append:"
     foreach ($plannedCopy in $plannedCopies) {
+        if ($plannedCopy.TargetsToRemove.Count -gt 0) {
+            Write-Host 'Remove existing target texture(s):'
+            foreach ($targetToRemove in $plannedCopy.TargetsToRemove) {
+                Write-Host "  $($targetToRemove.FullName)"
+            }
+        }
+
         Write-Host "Source:      $($plannedCopy.Source.FullName)"
         Write-Host "Destination: $($plannedCopy.Destination)"
         Write-Host ''
     }
 
-    $confirmation = Read-Host "Copy these $($missingSourceFiles.Count) missing file(s) into the destination? Type YES to continue"
+    $confirmation = Read-Host "Apply these $($plannedCopies.Count) append operation(s)? Type YES to continue"
     if ($confirmation -ne 'YES') {
         Write-Host 'Cancelled. No files were changed.'
         return
     }
 
     $copied = 0
+    $removed = 0
     $failed = 0
+    $removedTargetPaths = @{}
 
     foreach ($plannedCopy in $plannedCopies) {
         $destinationFolder = Split-Path -Path $plannedCopy.Destination -Parent
 
         try {
+            foreach ($targetToRemove in $plannedCopy.TargetsToRemove) {
+                if ($removedTargetPaths.ContainsKey($targetToRemove.FullName)) {
+                    continue
+                }
+
+                Remove-Item -LiteralPath $targetToRemove.FullName -Force
+                $removedTargetPaths[$targetToRemove.FullName] = $true
+                $removed++
+                Write-Host "Removed conflicting target texture: $($targetToRemove.FullName)"
+            }
+
             if (-not (Test-Path -LiteralPath $destinationFolder -PathType Container)) {
                 New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
             }
@@ -340,7 +461,7 @@ function Invoke-AppendMissingFiles {
     }
 
     Write-Host ''
-    Write-Host "Done. Copied: $copied. Failed: $failed."
+    Write-Host "Done. Removed: $removed. Copied: $copied. Failed: $failed."
     Restart-ExplorerIfRequested
 }
 

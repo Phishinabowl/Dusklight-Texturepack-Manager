@@ -17,7 +17,9 @@ Mode 2: Replace matching files.
 It crawls the source folder recursively, builds a lookup by file name, then crawls
 the target folder recursively. Whenever a target file has the same file name as a
 source file, the source file is copied over the target file. DDS and PNG files can
-also match by base file name even when their extensions are different.
+also match by base file name even when their extensions are different. Source files
+with no matching target file are copied into an "Extras-Imported" folder inside
+the destination folder.
 
 If the source tree contains duplicate file names, the script reports them and asks
 which one should be used for that name in replacement mode.
@@ -86,8 +88,8 @@ function Select-SourceFile {
 function Read-MergeMode {
     Write-Host ''
     Write-Host 'Select merge mode:'
-    Write-Host "[1] Append missing files - Add missing textures to another pack."
-    Write-Host "[2] Replace matching files - Overwrite one pack's textures with another pack's for a specific set of textures. (Ex: Replace TPHD UI textures with Henriko UI textures.)"
+    Write-Host "[1] Add additional base pack - Add missing textures to another pack WITHOUT overwriting anything existing (Ex. Fill in missing textures in TPHD with ones from Henriko)."
+    Write-Host "[2] Add/Replace additional texture mod - Overwrite one pack's textures with another pack's for a specific set of textures as well as add missing ones that are in the new pack. (Ex: Replace TPHD UI textures with Henriko or Nacho UI textures and add missing ones that come with the new UI's.)"
 
     while ($true) {
         $choice = Read-Host 'Enter 1 or 2'
@@ -278,6 +280,23 @@ function Get-ImportedDestinationPath {
     return Join-Path -Path $TargetFolder -ChildPath $importedRelativePath
 }
 
+function Get-ExtrasDestinationPath {
+    param(
+        [Parameter(Mandatory)]
+        [string]$SourceFolder,
+
+        [Parameter(Mandatory)]
+        [string]$TargetFolder,
+
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$SourceFile
+    )
+
+    $relativePath = Get-RelativePathFromFolder -BaseFolder $SourceFolder -FullPath $SourceFile.FullName
+    $extrasFolder = Join-Path -Path $TargetFolder -ChildPath 'Extras-Imported'
+    return Join-Path -Path $extrasFolder -ChildPath $relativePath
+}
+
 function New-PlannedCopy {
     param(
         [Parameter(Mandatory)]
@@ -313,34 +332,65 @@ function Invoke-ReplaceMatchingFiles {
         $TargetFiles | Where-Object { Test-ReplacementMatchExists -TargetFile $_ -SourceLookup $sourceByName }
     )
 
-    if ($foundMatches.Count -eq 0) {
-        Write-Host 'No target files matched source file names. Nothing to replace.'
+    $targetMatchKeys = @{}
+    foreach ($targetFile in $TargetFiles) {
+        $targetMatchKeys[(Get-ReplacementMatchKey -File $targetFile)] = $true
+    }
+
+    $plannedExtras = @(
+        foreach ($sourceFile in $SourceFiles) {
+            $sourceMatchKey = Get-ReplacementMatchKey -File $sourceFile
+
+            if ($targetMatchKeys.ContainsKey($sourceMatchKey)) {
+                continue
+            }
+
+            $destinationPath = Get-ExtrasDestinationPath -SourceFolder $SourceFolder -TargetFolder $TargetFolder -SourceFile $sourceFile
+            New-PlannedCopy -SourceFile $sourceFile -Destination $destinationPath
+        }
+    )
+
+    if ($foundMatches.Count -eq 0 -and $plannedExtras.Count -eq 0) {
+        Write-Host 'No target files matched source file names and no extra source files were found. Nothing to replace or add.'
         return
     }
 
-    Write-Host ''
-    Write-Host "Found $($foundMatches.Count) target file(s) to replace:"
-    foreach ($targetFile in $foundMatches) {
-        $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
-        $destinationPath = Get-ReplacementDestinationPath -SourceFile $sourceFile -TargetFile $targetFile
-        Write-Host "Target: $($targetFile.FullName)"
-        Write-Host "Source: $($sourceFile.FullName)"
-
-        if ($destinationPath -ne $targetFile.FullName) {
-            Write-Host "Destination: $destinationPath"
-            Write-Host 'Same texture with different extension detected. Texture will be replaced with new one with updated extension.'
-        }
-
+    if ($foundMatches.Count -gt 0) {
         Write-Host ''
+        Write-Host "Found $($foundMatches.Count) target file(s) to replace:"
+        foreach ($targetFile in $foundMatches) {
+            $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
+            $destinationPath = Get-ReplacementDestinationPath -SourceFile $sourceFile -TargetFile $targetFile
+            Write-Host "Target: $($targetFile.FullName)"
+            Write-Host "Source: $($sourceFile.FullName)"
+
+            if ($destinationPath -ne $targetFile.FullName) {
+                Write-Host "Destination: $destinationPath"
+                Write-Host 'Same texture with different extension detected. Texture will be replaced with new one with updated extension.'
+            }
+
+            Write-Host ''
+        }
     }
 
-    $confirmation = Read-Host "Replace these $($foundMatches.Count) file(s)? Type YES to continue"
+    if ($plannedExtras.Count -gt 0) {
+        Write-Host ''
+        Write-Host "Found $($plannedExtras.Count) extra source file(s) to add:"
+        foreach ($plannedExtra in $plannedExtras) {
+            Write-Host "Source:      $($plannedExtra.Source.FullName)"
+            Write-Host "Destination: $($plannedExtra.Destination)"
+            Write-Host ''
+        }
+    }
+
+    $confirmation = Read-Host "Apply $($foundMatches.Count) replacement(s) and add $($plannedExtras.Count) extra file(s)? Type YES to continue"
     if ($confirmation -ne 'YES') {
         Write-Host 'Cancelled. No files were changed.'
         return
     }
 
     $replaced = 0
+    $added = 0
     $failed = 0
 
     foreach ($targetFile in $foundMatches) {
@@ -362,8 +412,26 @@ function Invoke-ReplaceMatchingFiles {
         }
     }
 
+    foreach ($plannedExtra in $plannedExtras) {
+        $destinationFolder = Split-Path -Path $plannedExtra.Destination -Parent
+
+        try {
+            if (-not (Test-Path -LiteralPath $destinationFolder -PathType Container)) {
+                New-Item -ItemType Directory -Path $destinationFolder -Force | Out-Null
+            }
+
+            Copy-Item -LiteralPath $plannedExtra.Source.FullName -Destination $plannedExtra.Destination -Force
+            $added++
+            Write-Host "Added extra: $($plannedExtra.Destination)"
+        }
+        catch {
+            $failed++
+            Write-Warning "Failed to add extra '$($plannedExtra.Source.FullName)': $($_.Exception.Message)"
+        }
+    }
+
     Write-Host ''
-    Write-Host "Done. Replaced: $replaced. Failed: $failed."
+    Write-Host "Done. Replaced: $replaced. Added extras: $added. Failed: $failed."
     Restart-ExplorerIfRequested
 }
 

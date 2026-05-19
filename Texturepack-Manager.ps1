@@ -28,10 +28,18 @@ which one should be used for that name in replacement mode.
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# These are two incorrect texture files that Henriko left in the 1080p version of his pack. They're the "4K" and "4K Textures by Henriko" textures from the title screen. Ignoring them leaves it saying "HD" properly.
 $excludedFileNames = @(
-    # These are two incorrect texture files that Henriko left in the 1080p version of his pack. They're the "4K" and "4K Textures by Henriko" textures from the title screen. Ignoring them leaves it saying "HD" properly.
+    
     'tex1_608x100_0c1c70378fb8cb46_6.dds',
     'tex1_224x29_175aea04816c34a7_2.dds'
+)
+
+# These are the 3 known bad map files that have incorrect filenames. They're used later in the script to optionally apply a fix as part of pack compliation. The fix is currently specific to replacing part of the filename with a $ but can be modified to be more flexible if needed in the future.
+$knownBadMapFileNames = @(
+    'tex1_102x120_f3773035018b6280_459566e922a89796_9.dds',
+    'tex1_144x106_8263979b7265344e_61057d76cd16c174_9.dds',
+    'tex1_146x212_9f9bde0945cd631a_985f853111328ba7_9.dds'
 )
 
 function Read-FolderPath {
@@ -121,6 +129,183 @@ function Restart-ExplorerIfRequested {
     catch {
         Write-Warning "Could not restart File Explorer: $($_.Exception.Message)"
     }
+}
+
+function Test-PathIsInsideFolder {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Folder
+    )
+
+    try {
+        $resolvedPath = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+        $resolvedFolder = [System.IO.Path]::GetFullPath($Folder).TrimEnd('\', '/')
+        $folderWithSeparator = $resolvedFolder + [System.IO.Path]::DirectorySeparatorChar
+
+        return (
+            $resolvedPath.Equals($resolvedFolder, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $resolvedPath.StartsWith($folderWithSeparator, [System.StringComparison]::OrdinalIgnoreCase)
+        )
+    }
+    catch {
+        return $false
+    }
+}
+
+function Close-ExplorerWindowsForFoldersIfRequested {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$Folders
+    )
+
+    try {
+        $shell = New-Object -ComObject Shell.Application
+        $explorerWindows = @($shell.Windows())
+    }
+    catch {
+        Write-Warning "Could not inspect File Explorer windows: $($_.Exception.Message)"
+        return
+    }
+
+    $matchingWindows = @(
+        foreach ($window in $explorerWindows) {
+            try {
+                $folderPath = $window.Document.Folder.Self.Path
+
+                if ([string]::IsNullOrWhiteSpace($folderPath)) {
+                    continue
+                }
+
+                foreach ($folder in $Folders) {
+                    if (Test-PathIsInsideFolder -Path $folderPath -Folder $folder) {
+                        [PSCustomObject]@{
+                            Window = $window
+                            Path = $folderPath
+                        }
+                        break
+                    }
+                }
+            }
+            catch {
+                continue
+            }
+        }
+    )
+
+    if ($matchingWindows.Count -eq 0) {
+        return
+    }
+
+    Write-Host ''
+    Write-Host 'The following File Explorer window(s) are open inside the selected destination folder:'
+    foreach ($matchingWindow in $matchingWindows) {
+        Write-Host "  $($matchingWindow.Path)"
+    }
+
+    Write-Host ''
+    Write-Host 'Closing these windows before the merge can help prevent Windows from locking folders afterward.'
+    $confirmation = Read-Host 'Close these File Explorer window(s) now? Type YES to close them, or press Enter to skip'
+
+    if ($confirmation -ne 'YES') {
+        Write-Host 'Skipped closing File Explorer windows.'
+        return
+    }
+
+    foreach ($matchingWindow in $matchingWindows) {
+        try {
+            $matchingWindow.Window.Quit()
+            Write-Host "Closed Explorer window: $($matchingWindow.Path)"
+        }
+        catch {
+            Write-Warning "Could not close Explorer window '$($matchingWindow.Path)': $($_.Exception.Message)"
+        }
+    }
+}
+
+function Get-FixedMapFileName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$FileName
+    )
+
+    $parts = $FileName -split '_'
+
+    if ($parts.Count -lt 5) {
+        return $FileName
+    }
+
+    $parts[3] = '$'
+    return ($parts -join '_')
+}
+
+function Invoke-KnownBadMapFileFixIfRequested {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TargetFolder
+    )
+
+    $foundBadMapFiles = @(
+        Get-ChildItem -LiteralPath $TargetFolder -File -Recurse |
+            Where-Object { $_.Name -in $knownBadMapFileNames }
+    )
+
+    if ($foundBadMapFiles.Count -eq 0) {
+        return
+    }
+
+    $plannedRenames = @(
+        foreach ($badMapFile in $foundBadMapFiles) {
+            $fixedName = Get-FixedMapFileName -FileName $badMapFile.Name
+            $fixedPath = Join-Path -Path $badMapFile.DirectoryName -ChildPath $fixedName
+
+            [PSCustomObject]@{
+                Source = $badMapFile
+                Destination = $fixedPath
+            }
+        }
+    )
+
+    Write-Host ''
+    Write-Host "Found $($plannedRenames.Count) known bad map file(s) that can be renamed:"
+    foreach ($plannedRename in $plannedRenames) {
+        Write-Host "Current: $($plannedRename.Source.FullName)"
+        Write-Host "Fixed:   $($plannedRename.Destination)"
+        Write-Host ''
+    }
+
+    $confirmation = Read-Host 'Apply known map filename fix? Type YES to rename these file(s), or press Enter to skip'
+
+    if ($confirmation -ne 'YES') {
+        Write-Host 'Skipped known map filename fix.'
+        return
+    }
+
+    $renamed = 0
+    $failed = 0
+
+    foreach ($plannedRename in $plannedRenames) {
+        try {
+            if (Test-Path -LiteralPath $plannedRename.Destination -PathType Leaf) {
+                Write-Warning "Cannot rename '$($plannedRename.Source.FullName)' because '$($plannedRename.Destination)' already exists."
+                $failed++
+                continue
+            }
+
+            Rename-Item -LiteralPath $plannedRename.Source.FullName -NewName ([System.IO.Path]::GetFileName($plannedRename.Destination))
+            $renamed++
+            Write-Host "Renamed: $($plannedRename.Destination)"
+        }
+        catch {
+            $failed++
+            Write-Warning "Failed to rename '$($plannedRename.Source.FullName)': $($_.Exception.Message)"
+        }
+    }
+
+    Write-Host ''
+    Write-Host "Map filename fix complete. Renamed: $renamed. Failed: $failed."
 }
 
 function Get-ReplacementMatchKey {
@@ -432,7 +617,7 @@ function Invoke-ReplaceMatchingFiles {
 
     Write-Host ''
     Write-Host "Done. Replaced: $replaced. Added extras: $added. Failed: $failed."
-    Restart-ExplorerIfRequested
+    Invoke-KnownBadMapFileFixIfRequested -TargetFolder $TargetFolder
 }
 
 function Invoke-AppendMissingFiles {
@@ -531,7 +716,7 @@ function Invoke-AppendMissingFiles {
 
     Write-Host ''
     Write-Host "Done. Added: $copied. Failed: $failed."
-    Restart-ExplorerIfRequested
+    Invoke-KnownBadMapFileFixIfRequested -TargetFolder $TargetFolder
 }
 
 Write-Warning "This script can overwrite files when running in replace mode. Make sure you have backups of any important files before proceeding. The base script was AI generated and then improved upon and tested. Review it yourself to be sure you are comfortable running it. I am not responsible for any damage or loss of data that may occur from running this script."
@@ -549,6 +734,8 @@ $targetFolder = Read-FolderPath -Prompt 'Enter the destination folder (This can 
 if ($sourceFolder -eq $targetFolder) {
     throw 'Source and target folders must be different.'
 }
+
+Close-ExplorerWindowsForFoldersIfRequested -Folders @($targetFolder)
 
 Write-Host ''
 Write-Host "Scanning source folder: $sourceFolder"

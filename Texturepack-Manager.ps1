@@ -904,8 +904,6 @@ function Invoke-ReplaceMatchingFiles {
 
     Write-Host ''
     Write-Host "Done. Replaced: $replaced. Added extras: $added. Failed: $failed."
-    Invoke-KnownBadMapFileFixIfRequested -TargetFolder $TargetFolder
-    Invoke-GanonCrashTextureFixIfRequested -TargetFolder $TargetFolder
 }
 
 # Main append function. Leverages previous functions as needed to do the merge progress in an organized way and confirm their selections.
@@ -1007,8 +1005,6 @@ function Invoke-AppendMissingFiles {
 
     Write-Host ''
     Write-Host "Done. Added: $copied. Failed: $failed."
-    Invoke-KnownBadMapFileFixIfRequested -TargetFolder $TargetFolder
-    Invoke-GanonCrashTextureFixIfRequested -TargetFolder $TargetFolder
 }
 
 Write-Warning "This script can overwrite files when running in replace mode. Make sure you have backups of any important files before proceeding. The base script was AI generated and then improved upon and tested. Review it yourself to be sure you are comfortable running it. I am not responsible for any damage or loss of data that may occur from running this script."
@@ -1089,21 +1085,25 @@ if ($excludedSourceFiles.Count -gt 0) {
     Write-Host "Excluded $($excludedSourceFiles.Count) source file(s) by configured filename exclusions."
 }
 
-if ($sourceFiles.Count -eq 0) {
-    Write-Warning 'No source files were found. Nothing to merge.'
-    exit 0
-}
-
 Write-Host ''
 Write-Host "Scanning target folder: $targetFolder"
 $targetFiles = @(Get-ChildItem -LiteralPath $targetFolder -File -Recurse)
 
-# Switch to actually call the proper mode with all finalized parameters based on mode selection.
-switch ($mergeMode) {
-    'ReplaceMode' {
-        Invoke-ReplaceMatchingFiles -SourceFolder $sourceFolder -TargetFolder $targetFolder -SourceFiles $sourceFiles -TargetFiles $targetFiles
-    }
-    'AppendMode' {
-        Invoke-AppendMissingFiles -SourceFolder $sourceFolder -TargetFolder $targetFolder -SourceFiles $sourceFiles -TargetFiles $targetFiles
+# Switch to actually call the proper mode with all finalized parameters based on mode selection if source textures were actually found. Skips if no source textures found so it can still apply fixes if needed.
+if ($sourceFiles.Count -eq 0) {
+    Write-Warning 'No source files were found. Nothing to merge.'
+}
+else {
+    switch ($mergeMode) {
+        'ReplaceMode' {
+            Invoke-ReplaceMatchingFiles -SourceFolder $sourceFolder -TargetFolder $targetFolder -SourceFiles $sourceFiles -TargetFiles $targetFiles
+        }
+        'AppendMode' {
+            Invoke-AppendMissingFiles -SourceFolder $sourceFolder -TargetFolder $targetFolder -SourceFiles $sourceFiles -TargetFiles $targetFiles
+        }
     }
 }
+
+# Call both of the post-merge fixes even if the source folder didn't have anything to add or merge in. Useful for pack maintenance without other changes.
+Invoke-KnownBadMapFileFixIfRequested -TargetFolder $targetFolder
+Invoke-GanonCrashTextureFixIfRequested -TargetFolder $targetFolder

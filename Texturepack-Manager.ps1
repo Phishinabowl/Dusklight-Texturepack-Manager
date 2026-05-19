@@ -25,6 +25,17 @@ If the source tree contains duplicate file names, the script reports them and as
 which one should be used for that name in replacement mode.
 #>
 
+[CmdletBinding()]
+param(
+    [switch]$NoUI,
+
+    [string]$Mode,
+
+    [string]$Source,
+
+    [string]$Destination
+)
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -42,14 +53,71 @@ $knownBadMapFileNames = @(
     'tex1_146x212_9f9bde0945cd631a_985f853111328ba7_9.dds'
 )
 
+function Resolve-FolderPathFromInput {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+
+        [Parameter(Mandatory)]
+        [string]$Label
+    )
+
+    $cleanPath = $Path.Trim().Trim('"').Trim("'")
+
+    if ([string]::IsNullOrWhiteSpace($cleanPath)) {
+        throw "$Label folder path cannot be blank."
+    }
+
+    if (-not (Test-Path -LiteralPath $cleanPath -PathType Container)) {
+        throw "$Label folder not found: $cleanPath"
+    }
+
+    return (Resolve-Path -LiteralPath $cleanPath).Path
+}
+
 function Read-FolderPath {
     param(
         [Parameter(Mandatory)]
-        [string]$Prompt
+        [string]$Prompt,
+
+        [string]$DialogDescription = 'Select a folder.',
+
+        [string]$InputPrompt = 'Folder path'
     )
 
+    Write-Host $Prompt
+
+    if (-not $NoUI) {
+        $folderDialog = $null
+
+        try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+
+            $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+            $folderDialog.Description = $DialogDescription
+            $folderDialog.ShowNewFolderButton = $false
+
+            $dialogResult = $folderDialog.ShowDialog()
+
+            if ($dialogResult -eq [System.Windows.Forms.DialogResult]::OK -and -not [string]::IsNullOrWhiteSpace($folderDialog.SelectedPath)) {
+                return (Resolve-Path -LiteralPath $folderDialog.SelectedPath).Path
+            }
+
+            Write-Host 'No folder selected in the folder picker. Falling back to typed path input.'
+        }
+        catch {
+            Write-Warning "Could not open the Windows folder picker: $($_.Exception.Message)"
+            Write-Host 'Falling back to typed path input.'
+        }
+        finally {
+            if ($null -ne $folderDialog) {
+                $folderDialog.Dispose()
+            }
+        }
+    }
+
     while ($true) {
-        $path = Read-Host $Prompt
+        $path = Read-Host $InputPrompt
         $path = $path.Trim().Trim('"')
 
         if ([string]::IsNullOrWhiteSpace($path)) {
@@ -62,6 +130,26 @@ function Read-FolderPath {
         }
 
         Write-Warning "Folder not found: $path"
+    }
+}
+
+function ConvertTo-MergeMode {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Mode
+    )
+
+    switch ($Mode.Trim().ToLowerInvariant()) {
+        '1' { return 'AppendMode' }
+        'append' { return 'AppendMode' }
+        'appendmode' { return 'AppendMode' }
+        'add' { return 'AppendMode' }
+        '2' { return 'ReplaceMode' }
+        'replace' { return 'ReplaceMode' }
+        'replacemode' { return 'ReplaceMode' }
+        default {
+            throw "Invalid mode '$Mode'. Use 'append', 'replace', '1', or '2'."
+        }
     }
 }
 
@@ -837,11 +925,30 @@ write-host ''
 Write-Host 'You will be prompted for a source and destination folder momentarily. The source should be the folder containing the textures you want to use for replacement. The destination should be the folder containing the textures you want to have replaced. Ex: You want to copy Henriko UI into TPHD pack. Henriko UI folder would be source, TPHD pack would be destination.'
 
 write-host ''
-$mergeMode = Read-MergeMode
+if ([string]::IsNullOrWhiteSpace($Mode)) {
+    $mergeMode = Read-MergeMode
+}
+else {
+    $mergeMode = ConvertTo-MergeMode -Mode $Mode
+    Write-Host "Selected merge mode from parameter: $mergeMode"
+}
 
 write-host ''
-$sourceFolder = Read-FolderPath -Prompt 'Enter the source folder (Either the GZ2 folder of a pack or a subfolder of it for specific textures.)'
-$targetFolder = Read-FolderPath -Prompt 'Enter the destination folder (This can be the parent folder for the target pack as it will only replace files that have the same name as those in the source folder regardless of destination folder or add new textures to folders with -Imported appended.)'
+if ([string]::IsNullOrWhiteSpace($Source)) {
+    $sourceFolder = Read-FolderPath -Prompt 'Select the source folder. This should be either the GZ2 folder of a pack or a subfolder of it for specific textures.' -DialogDescription 'Select the source folder.' -InputPrompt 'Source folder path'
+}
+else {
+    $sourceFolder = Resolve-FolderPathFromInput -Path $Source -Label 'Source'
+    Write-Host "Selected source folder from parameter: $sourceFolder"
+}
+
+if ([string]::IsNullOrWhiteSpace($Destination)) {
+    $targetFolder = Read-FolderPath -Prompt 'Select the destination folder. This can be the parent folder for the target pack.' -DialogDescription 'Select the destination folder.' -InputPrompt 'Destination folder path'
+}
+else {
+    $targetFolder = Resolve-FolderPathFromInput -Path $Destination -Label 'Destination'
+    Write-Host "Selected destination folder from parameter: $targetFolder"
+}
 
 if ($sourceFolder -eq $targetFolder) {
     throw 'Source and target folders must be different.'

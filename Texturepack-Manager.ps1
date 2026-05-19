@@ -934,24 +934,52 @@ else {
 }
 
 write-host ''
-if ([string]::IsNullOrWhiteSpace($Source)) {
-    $sourceFolder = Read-FolderPath -Prompt 'Select the source folder. This should be either the GZ2 folder of a pack or a subfolder of it for specific textures.' -DialogDescription 'Select the source folder.' -InputPrompt 'Source folder path'
-}
-else {
-    $sourceFolder = Resolve-FolderPathFromInput -Path $Source -Label 'Source'
-    Write-Host "Selected source folder from parameter: $sourceFolder"
-}
+$fullParameterRun = (
+    -not [string]::IsNullOrWhiteSpace($Mode) -and
+    -not [string]::IsNullOrWhiteSpace($Source) -and
+    -not [string]::IsNullOrWhiteSpace($Destination)
+)
 
-if ([string]::IsNullOrWhiteSpace($Destination)) {
-    $targetFolder = Read-FolderPath -Prompt 'Select the destination folder. This can be the parent folder for the target pack.' -DialogDescription 'Select the destination folder.' -InputPrompt 'Destination folder path'
-}
-else {
-    $targetFolder = Resolve-FolderPathFromInput -Path $Destination -Label 'Destination'
-    Write-Host "Selected destination folder from parameter: $targetFolder"
-}
+$sourceInput = $Source
+$destinationInput = $Destination
 
-if ($sourceFolder -eq $targetFolder) {
-    throw 'Source and target folders must be different.'
+while ($true) {
+    if ([string]::IsNullOrWhiteSpace($sourceInput)) {
+        $sourceFolder = Read-FolderPath -Prompt 'Select the source folder. This should be either the GZ2 folder of a pack or a subfolder of it for specific textures.' -DialogDescription 'Select the source folder.' -InputPrompt 'Source folder path'
+
+        if ($NoUI -and [string]::IsNullOrWhiteSpace($destinationInput)) {
+            Write-Host ''
+        }
+    }
+    else {
+        $sourceFolder = Resolve-FolderPathFromInput -Path $sourceInput -Label 'Source'
+        Write-Host "Selected source folder from parameter: $sourceFolder"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($destinationInput)) {
+        $targetFolder = Read-FolderPath -Prompt 'Select the destination folder. This can be the parent folder for the target pack.' -DialogDescription 'Select the destination folder.' -InputPrompt 'Destination folder path'
+    }
+    else {
+        $targetFolder = Resolve-FolderPathFromInput -Path $destinationInput -Label 'Destination'
+        Write-Host "Selected destination folder from parameter: $targetFolder"
+    }
+
+    if ($sourceFolder -ne $targetFolder) {
+        break
+    }
+
+    if ($fullParameterRun) {
+        Write-Host ''
+        Write-Host 'Error: Source and destination folders must be different.'
+        exit 1
+    }
+
+    Write-Host ''
+    Write-Warning 'Source and destination folders must be different. Please select them again.'
+    Write-Host ''
+
+    $sourceInput = $null
+    $destinationInput = $null
 }
 
 Write-Host ''

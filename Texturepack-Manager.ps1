@@ -47,12 +47,27 @@ $excludedFileNames = @(
 )
 
 # These are the 3 known bad map files that have incorrect filenames. They're used later in the script to optionally apply a fix as part of pack compliation. The fix is currently specific to replacing part of the filename with a $ but can be modified to be more flexible if needed in the future.
-$knownBadMapFileNames = @(
+$knownBadMapTextures = @(
     'tex1_102x120_f3773035018b6280_459566e922a89796_9.dds',
     'tex1_144x106_8263979b7265344e_61057d76cd16c174_9.dds',
     'tex1_146x212_9f9bde0945cd631a_985f853111328ba7_9.dds'
 )
 
+# These are the 10 known textures that cause a crash at the Ganon fight. They're used later in the script to optionally delete them as a fix.
+$knownGanonCrashTextures = @(
+    'tex1_64x128_42a81d681458a99e_c76409b1f3c666b4_9.dds',
+    'tex1_128x128_$_09ff3a30595fd17c_9.dds',
+    'tex1_128x128_$_469903a1ef201ca2_9.dds',
+    'tex1_128x128__09ff3a30595fd17c_9.dds',
+    'tex1_128x128__469903a1ef201ca2_9.dds',
+    'tex1_128x128_599b0361a5991ac1_fc40ed6b1c11c93a_9.dds',
+    'tex1_128x128_7794b382ef5dcd79_898ce8ea66350cd6_9.dds',
+    'tex1_256x128_068c15f29fd8ef7a_14.dds',
+    'tex1_256x256_9136b72d881e3a56_14.dds',
+    'tex1_256x256_d7d0ea2b944a58c5_14.dds'
+)
+
+# Checks if folder exists and resolves to full path, with error handling and trimming of extra whitespace or quotes from input.
 function Resolve-FolderPathFromInput {
     param(
         [Parameter(Mandatory)]
@@ -75,6 +90,7 @@ function Resolve-FolderPathFromInput {
     return (Resolve-Path -LiteralPath $cleanPath).Path
 }
 
+# Function to define the dialog prompts for the folder picker dialog box and present them and what shows up in the terminal as well if it falls back to terminal input.
 function Read-FolderPath {
     param(
         [Parameter(Mandatory)]
@@ -133,6 +149,7 @@ function Read-FolderPath {
     }
 }
 
+# Simple function to convert mode selection input for the advanced user -mode switch into the proper mode to pass into the script. Allows for a few different parameter's to resolve to the same mode for ease of use.
 function ConvertTo-MergeMode {
     param(
         [Parameter(Mandatory)]
@@ -148,11 +165,12 @@ function ConvertTo-MergeMode {
         'replace' { return 'ReplaceMode' }
         'replacemode' { return 'ReplaceMode' }
         default {
-            throw "Invalid mode '$Mode'. Use 'append', 'replace', '1', or '2'."
+            throw "Invalid mode '$Mode'. Use '1', 'add', 'append', 'appendmode', '2', 'replace', or 'replacemode'."
         }
     }
 }
 
+# Function to handle cases where multiple source textures have the same name. Allows user to choose which to use per-texture if detected.
 function Select-SourceFile {
     param(
         [Parameter(Mandatory)]
@@ -181,6 +199,7 @@ function Select-SourceFile {
     }
 }
 
+# Function to get the merge mode from the user if it wasn't provided by the -mode parameter.
 function Read-MergeMode {
     Write-Host ''
     Write-Host 'Select merge mode:'
@@ -198,6 +217,7 @@ function Read-MergeMode {
     }
 }
 
+# Function to restart windows explorer at the end of the script. Unused as of now but left in in case fallback is needed at end of script later.
 function Restart-ExplorerIfRequested {
     Write-Host ''
     Write-Host 'Windows File Explorer may keep folder handles open after many files are copied or replaced.'
@@ -219,6 +239,7 @@ function Restart-ExplorerIfRequested {
     }
 }
 
+# Function that checks subfolders of file explorer windows to see if any subfolders of the given destination folder is open in explorer.
 function Test-PathIsInsideFolder {
     param(
         [Parameter(Mandatory)]
@@ -243,6 +264,7 @@ function Test-PathIsInsideFolder {
     }
 }
 
+# Function to close COM object references from the explorer window handling. Makes object handling cleaner and prevents issues in VS code when running script multiple times due to how VS code powershell extension works with COM objects. Mostly for dev convenience but also good housekeeping.
 function Clear-ComObjectReference {
     param(
         [object]$ComObject
@@ -262,6 +284,7 @@ function Clear-ComObjectReference {
     }
 }
 
+# Works with the Test-PathIsInsideFolder function to get the paths of any open explorer windows that are inside the destination folder or its subfolders, so the user can choose to close them before the merge to help prevent file locks.
 function Get-MatchingExplorerWindowPaths {
     param(
         [Parameter(Mandatory)]
@@ -318,6 +341,7 @@ function Get-MatchingExplorerWindowPaths {
     return @($matchingPaths)
 }
 
+# Function that actually closes the open explorer window if it was detected 
 function Close-MatchingExplorerWindows {
     param(
         [Parameter(Mandatory)]
@@ -369,6 +393,7 @@ function Close-MatchingExplorerWindows {
     }
 }
 
+# Function to shows explorer window that needs to be closed (if any) and prompts the user if they want to close it or not.
 function Close-ExplorerWindowsForFoldersIfRequested {
     param(
         [Parameter(Mandatory)]
@@ -399,6 +424,7 @@ function Close-ExplorerWindowsForFoldersIfRequested {
     Close-MatchingExplorerWindows -Folders $Folders
 }
 
+# Function to fix the known bad map file names.
 function Get-FixedMapFileName {
     param(
         [Parameter(Mandatory)]
@@ -415,19 +441,21 @@ function Get-FixedMapFileName {
     return ($parts -join '_')
 }
 
+# Function to normalize filenames and check against known bad map file names.
 function Get-NormalizedFileName {
     param(
         [Parameter(Mandatory)]
         [string]$FileName
     )
 
-    if ($FileName -in $knownBadMapFileNames) {
+    if ($FileName -in $knownBadMapTextures) {
         return Get-FixedMapFileName -FileName $FileName
     }
 
     return $FileName
 }
 
+# Function to prompt the user to apply the bad map filename fix if any were detected.
 function Invoke-KnownBadMapFileFixIfRequested {
     param(
         [Parameter(Mandatory)]
@@ -436,7 +464,7 @@ function Invoke-KnownBadMapFileFixIfRequested {
 
     $foundBadMapFiles = @(
         Get-ChildItem -LiteralPath $TargetFolder -File -Recurse |
-            Where-Object { $_.Name -in $knownBadMapFileNames }
+            Where-Object { $_.Name -in $knownBadMapTextures }
     )
 
     if ($foundBadMapFiles.Count -eq 0) {
@@ -495,6 +523,56 @@ function Invoke-KnownBadMapFileFixIfRequested {
     Write-Host "Map filename fix complete. Renamed: $renamed. Failed: $failed."
 }
 
+# Function to prompt the user to apply the Ganon crash texture fix if detected.
+function Invoke-GanonCrashTextureFixIfRequested {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TargetFolder
+    )
+
+    $foundCrashTextureFiles = @(
+        Get-ChildItem -LiteralPath $TargetFolder -File -Recurse |
+            Where-Object { $_.Name -in $knownGanonCrashTextures }
+    )
+
+    if ($foundCrashTextureFiles.Count -eq 0) {
+        return
+    }
+
+    Write-Host ''
+    Write-Host "Found $($foundCrashTextureFiles.Count) known Ganon Crash texture file(s) that can be deleted:"
+    foreach ($crashTextureFile in $foundCrashTextureFiles) {
+        Write-Host "  $($crashTextureFile.FullName)"
+    }
+
+    Write-Host ''
+    $confirmation = Read-Host 'Apply Ganon Crash texture cleanup? Type YES to delete these file(s), or press Enter to skip'
+
+    if ($confirmation -ne 'YES') {
+        Write-Host 'Skipped Ganon Crash texture cleanup.'
+        return
+    }
+
+    $deleted = 0
+    $failed = 0
+
+    foreach ($crashTextureFile in $foundCrashTextureFiles) {
+        try {
+            Remove-Item -LiteralPath $crashTextureFile.FullName -Force
+            $deleted++
+            Write-Host "Deleted: $($crashTextureFile.FullName)"
+        }
+        catch {
+            $failed++
+            Write-Warning "Failed to delete '$($crashTextureFile.FullName)': $($_.Exception.Message)"
+        }
+    }
+
+    Write-Host ''
+    Write-Host "Ganon Crash texture cleanup complete. Deleted: $deleted. Failed: $failed."
+}
+
+# Gives matching key for use in replacements. DDS/PNG: filename without extension, everything else: full filename, known bad map names: normalized first.
 function Get-ReplacementMatchKey {
     param(
         [Parameter(Mandatory)]
@@ -511,6 +589,7 @@ function Get-ReplacementMatchKey {
     return $normalizedFileName
 }
 
+# Function to check whether texture file is a DDS or PNG image.
 function Test-DdsOrPngFile {
     param(
         [Parameter(Mandatory)]
@@ -521,6 +600,7 @@ function Test-DdsOrPngFile {
     return ($extension -eq '.dds' -or $extension -eq '.png')
 }
 
+# Function to build lookup table for replacements based on match key. If multiple source textures have the same match key, prompts user to choose which one to use for that key.
 function Get-SourceLookupForReplacement {
     param(
         [Parameter(Mandatory)]
@@ -554,6 +634,7 @@ function Get-SourceLookupForReplacement {
     return $sourceByKey
 }
 
+# Function that finds the right source texture for replacement based on given target texture.
 function Get-SourceFileForReplacement {
     param(
         [Parameter(Mandatory)]
@@ -567,6 +648,7 @@ function Get-SourceFileForReplacement {
     return $SourceLookup[$matchKey]
 }
 
+# Function to check if the target texture has a matching source texture in the lookup table. Used to build lookup table.
 function Test-ReplacementMatchExists {
     param(
         [Parameter(Mandatory)]
@@ -580,6 +662,7 @@ function Test-ReplacementMatchExists {
     return $SourceLookup.ContainsKey($matchKey)
 }
 
+# Function to decide where to put replacement textures. Accounts for PNG and DDS extension differences.
 function Get-ReplacementDestinationPath {
     param(
         [Parameter(Mandatory)]
@@ -600,6 +683,7 @@ function Get-ReplacementDestinationPath {
     return $TargetFile.FullName
 }
 
+# Function to convert a full source texture path into a path relative to the selected source folder. Used for keeping folder structure of incoming packs the same.
 function Get-RelativePathFromFolder {
     param(
         [Parameter(Mandatory)]
@@ -613,6 +697,7 @@ function Get-RelativePathFromFolder {
     return $FullPath.Substring($baseWithSeparator.Length)
 }
 
+# Function to rename incoming folders with the -Imported suffix to make incoming new files more obvious.
 function ConvertTo-ImportedRelativePath {
     param(
         [Parameter(Mandatory)]
@@ -637,6 +722,7 @@ function ConvertTo-ImportedRelativePath {
     return Join-Path -Path $importedFolderPath -ChildPath $normalizedFileName
 }
 
+# Function to build the full append destination path in the proper target folder.
 function Get-ImportedDestinationPath {
     param(
         [Parameter(Mandatory)]
@@ -654,6 +740,7 @@ function Get-ImportedDestinationPath {
     return Join-Path -Path $TargetFolder -ChildPath $importedRelativePath
 }
 
+# Function to create the Extras-Imported folder (if needed).
 function Get-ExtrasDestinationPath {
     param(
         [Parameter(Mandatory)]
@@ -678,6 +765,7 @@ function Get-ExtrasDestinationPath {
     return Join-Path -Path (Join-Path -Path $extrasFolder -ChildPath $relativeFolder) -ChildPath $normalizedFileName
 }
 
+# Function to create a new planned copy for each texture so it can easily/properly display them in the preview to the user for each texture.
 function New-PlannedCopy {
     param(
         [Parameter(Mandatory)]
@@ -693,6 +781,7 @@ function New-PlannedCopy {
     }
 }
 
+# Main add/replacement function. Leverages previous functions as needed to do the merge progress in an organized way and confirm their selections.
 function Invoke-ReplaceMatchingFiles {
     param(
         [Parameter(Mandatory)]
@@ -816,8 +905,10 @@ function Invoke-ReplaceMatchingFiles {
     Write-Host ''
     Write-Host "Done. Replaced: $replaced. Added extras: $added. Failed: $failed."
     Invoke-KnownBadMapFileFixIfRequested -TargetFolder $TargetFolder
+    Invoke-GanonCrashTextureFixIfRequested -TargetFolder $TargetFolder
 }
 
+# Main append function. Leverages previous functions as needed to do the merge progress in an organized way and confirm their selections.
 function Invoke-AppendMissingFiles {
     param(
         [Parameter(Mandatory)]
@@ -917,6 +1008,7 @@ function Invoke-AppendMissingFiles {
     Write-Host ''
     Write-Host "Done. Added: $copied. Failed: $failed."
     Invoke-KnownBadMapFileFixIfRequested -TargetFolder $TargetFolder
+    Invoke-GanonCrashTextureFixIfRequested -TargetFolder $TargetFolder
 }
 
 Write-Warning "This script can overwrite files when running in replace mode. Make sure you have backups of any important files before proceeding. The base script was AI generated and then improved upon and tested. Review it yourself to be sure you are comfortable running it. I am not responsible for any damage or loss of data that may occur from running this script."
@@ -943,6 +1035,7 @@ $fullParameterRun = (
 $sourceInput = $Source
 $destinationInput = $Destination
 
+# Loop that forces user to keep selecting new destination folder if they accidenttally select the same source and destination folders.
 while ($true) {
     if ([string]::IsNullOrWhiteSpace($sourceInput)) {
         $sourceFolder = Read-FolderPath -Prompt 'Select the source folder. This should be either the GZ2 folder of a pack or a subfolder of it for specific textures.' -DialogDescription 'Select the source folder.' -InputPrompt 'Source folder path'
@@ -1005,6 +1098,7 @@ Write-Host ''
 Write-Host "Scanning target folder: $targetFolder"
 $targetFiles = @(Get-ChildItem -LiteralPath $targetFolder -File -Recurse)
 
+# Switch to actually call the proper mode with all finalized parameters based on mode selection.
 switch ($mergeMode) {
     'ReplaceMode' {
         Invoke-ReplaceMatchingFiles -SourceFolder $sourceFolder -TargetFolder $targetFolder -SourceFiles $sourceFiles -TargetFiles $targetFiles

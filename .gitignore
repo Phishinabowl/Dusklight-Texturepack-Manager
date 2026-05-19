@@ -1,0 +1,16 @@
+# VS Code
+.vscode/
+
+# PowerShell / logs
+*.log
+*.tmp
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Archives / releases
+*.zip
+
+# OS junk
+.DS_Store

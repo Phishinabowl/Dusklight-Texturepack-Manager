@@ -96,6 +96,27 @@ function Read-MergeMode {
     }
 }
 
+function Restart-ExplorerIfRequested {
+    Write-Host ''
+    Write-Host 'Windows File Explorer may keep folder handles open after many files are copied or replaced.'
+    Write-Host 'If you cannot rename or delete the merged folder after this script finishes, restarting Explorer usually releases those handles.'
+    $confirmation = Read-Host 'Restart File Explorer now? Type YES to restart it, or press Enter to skip'
+
+    if ($confirmation -ne 'YES') {
+        Write-Host 'Skipped Explorer restart.'
+        return
+    }
+
+    try {
+        Stop-Process -Name explorer -Force -ErrorAction Stop
+        Start-Process explorer.exe
+        Write-Host 'File Explorer restarted.'
+    }
+    catch {
+        Write-Warning "Could not restart File Explorer: $($_.Exception.Message)"
+    }
+}
+
 function Get-SourceLookupByName {
     param(
         [Parameter(Mandatory)]
@@ -244,6 +265,7 @@ function Invoke-ReplaceMatchingFiles {
 
     Write-Host ''
     Write-Host "Done. Replaced: $replaced. Failed: $failed."
+    Restart-ExplorerIfRequested
 }
 
 function Invoke-AppendMissingFiles {
@@ -319,6 +341,7 @@ function Invoke-AppendMissingFiles {
 
     Write-Host ''
     Write-Host "Done. Copied: $copied. Failed: $failed."
+    Restart-ExplorerIfRequested
 }
 
 Write-Warning "This script can overwrite files when running in replace mode. Make sure you have backups of any important files before proceeding. This is an AI generated script that HAS been reviewed and tested. Review it yourself to be sure you are comfortable running it. I am not responsible for any damage or loss of data that may occur from running this script."

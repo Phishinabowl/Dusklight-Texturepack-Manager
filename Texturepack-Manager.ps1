@@ -204,6 +204,26 @@ function Test-ReplacementMatchExists {
     return $SourceLookup.ContainsKey($matchKey)
 }
 
+function Get-ReplacementDestinationPath {
+    param(
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$SourceFile,
+
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$TargetFile
+    )
+
+    $sourceIsTexture = Test-DdsOrPngFile -File $SourceFile
+    $targetIsTexture = Test-DdsOrPngFile -File $TargetFile
+
+    if ($sourceIsTexture -and $targetIsTexture -and $SourceFile.Extension -ne $TargetFile.Extension) {
+        $targetFolder = Split-Path -Path $TargetFile.FullName -Parent
+        return Join-Path -Path $targetFolder -ChildPath $SourceFile.Name
+    }
+
+    return $TargetFile.FullName
+}
+
 function Get-RelativePathFromFolder {
     param(
         [Parameter(Mandatory)]
@@ -301,8 +321,15 @@ function Invoke-ReplaceMatchingFiles {
     Write-Host "Found $($matches.Count) target file(s) to replace:"
     foreach ($targetFile in $matches) {
         $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
+        $destinationPath = Get-ReplacementDestinationPath -SourceFile $sourceFile -TargetFile $targetFile
         Write-Host "Target: $($targetFile.FullName)"
         Write-Host "Source: $($sourceFile.FullName)"
+
+        if ($destinationPath -ne $targetFile.FullName) {
+            Write-Host "Destination: $destinationPath"
+            Write-Host 'Action: Remove target file, then copy source using source extension.'
+        }
+
         Write-Host ''
     }
 
@@ -317,11 +344,16 @@ function Invoke-ReplaceMatchingFiles {
 
     foreach ($targetFile in $matches) {
         $sourceFile = Get-SourceFileForReplacement -TargetFile $targetFile -SourceLookup $sourceByName
+        $destinationPath = Get-ReplacementDestinationPath -SourceFile $sourceFile -TargetFile $targetFile
 
         try {
-            Copy-Item -LiteralPath $sourceFile.FullName -Destination $targetFile.FullName -Force
+            if ($destinationPath -ne $targetFile.FullName) {
+                Remove-Item -LiteralPath $targetFile.FullName -Force
+            }
+
+            Copy-Item -LiteralPath $sourceFile.FullName -Destination $destinationPath -Force
             $replaced++
-            Write-Host "Replaced: $($targetFile.FullName)"
+            Write-Host "Replaced: $destinationPath"
         }
         catch {
             $failed++

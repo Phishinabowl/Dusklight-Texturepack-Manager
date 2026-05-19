@@ -50,7 +50,7 @@ $excludedFileNames = @(
 $knownBadMapTextures = @(
     'tex1_102x120_f3773035018b6280_459566e922a89796_9.dds',
     'tex1_144x106_8263979b7265344e_61057d76cd16c174_9.dds',
-    'tex1_146x212_9f9bde0945cd631a_985f853111328ba7_9.dds'
+    'tex1_165x137_d8cd3e541988479d_e0880fb04d393b18_9.dds'
 )
 
 # These are the 10 known textures that cause a crash at the Ganon fight. They're used later in the script to optionally delete them as a fix.
@@ -164,8 +164,11 @@ function ConvertTo-MergeMode {
         '2' { return 'ReplaceMode' }
         'replace' { return 'ReplaceMode' }
         'replacemode' { return 'ReplaceMode' }
+        '3' { return 'PatchMode' }
+        'patch' { return 'PatchMode' }
+        'patchmode' { return 'PatchMode' }
         default {
-            throw "Invalid mode '$Mode'. Use '1', 'add', 'append', 'appendmode', '2', 'replace', or 'replacemode'."
+            throw "Invalid mode '$Mode'. Use '1', 'add', 'append', 'appendmode', '2', 'replace', 'replacemode', '3', 'patch', or 'patchmode'."
         }
     }
 }
@@ -205,14 +208,16 @@ function Read-MergeMode {
     Write-Host 'Select merge mode:'
     Write-Host "[1] Add additional base pack - Add missing textures to another pack WITHOUT overwriting anything existing (Ex. Fill in missing textures in TPHD with ones from Henriko)."
     Write-Host "[2] Add/Replace additional texture mod - Overwrite one pack's textures with another pack's for a specific set of textures as well as add missing ones that are in the new pack. (Ex: Replace TPHD UI textures with Henriko or Nacho UI textures and add missing ones that come with the new UI's.)"
+    Write-Host "[3] Patch existing pack - Only scan the destination folder and offer known fixes without adding or replacing textures."
 
     while ($true) {
-        $choice = Read-Host 'Enter 1 or 2'
+        $choice = Read-Host 'Enter 1, 2, or 3'
 
         switch ($choice.Trim()) {
             '1' { return 'AppendMode' }
             '2' { return 'ReplaceMode' }
-            default { Write-Warning 'Invalid choice. Please enter 1 or 2.' }
+            '3' { return 'PatchMode' }
+            default { Write-Warning 'Invalid choice. Please enter 1, 2, or 3.' }
         }
     }
 }
@@ -1010,7 +1015,7 @@ function Invoke-AppendMissingFiles {
 Write-Warning "This script can overwrite files when running in replace mode. Make sure you have backups of any important files before proceeding. The base script was AI generated and then improved upon and tested. Review it yourself to be sure you are comfortable running it. I am not responsible for any damage or loss of data that may occur from running this script."
 
 write-host ''
-Write-Host 'You will be prompted for a source and destination folder momentarily. The source should be the folder containing the textures you want to use for replacement. The destination should be the folder containing the textures you want to have replaced. Ex: You want to copy Henriko UI into TPHD pack. Henriko UI folder would be source, TPHD pack would be destination.'
+Write-Host 'You will be prompted for the folders needed by the selected mode. The source should be the folder containing textures you want to add or use for replacement. Patch mode only needs a destination folder.'
 
 write-host ''
 if ([string]::IsNullOrWhiteSpace($Mode)) {
@@ -1018,14 +1023,17 @@ if ([string]::IsNullOrWhiteSpace($Mode)) {
 }
 else {
     $mergeMode = ConvertTo-MergeMode -Mode $Mode
-    Write-Host "Selected merge mode from parameter: $mergeMode"
+    Write-Host "Selected run mode from parameter: $mergeMode"
 }
 
 write-host ''
+
+# Section that skips to patches if running in patch mode.
+$patchMode = ($mergeMode -eq 'PatchMode')
 $fullParameterRun = (
     -not [string]::IsNullOrWhiteSpace($Mode) -and
-    -not [string]::IsNullOrWhiteSpace($Source) -and
-    -not [string]::IsNullOrWhiteSpace($Destination)
+    -not [string]::IsNullOrWhiteSpace($Destination) -and
+    ($patchMode -or -not [string]::IsNullOrWhiteSpace($Source))
 )
 
 $sourceInput = $Source
@@ -1033,16 +1041,18 @@ $destinationInput = $Destination
 
 # Loop that forces user to keep selecting new destination folder if they accidenttally select the same source and destination folders.
 while ($true) {
-    if ([string]::IsNullOrWhiteSpace($sourceInput)) {
-        $sourceFolder = Read-FolderPath -Prompt 'Select the source folder. This should be either the GZ2 folder of a pack or a subfolder of it for specific textures.' -DialogDescription 'Select the source folder.' -InputPrompt 'Source folder path'
+    if (-not $patchMode) {
+        if ([string]::IsNullOrWhiteSpace($sourceInput)) {
+            $sourceFolder = Read-FolderPath -Prompt 'Select the source folder. This should be either the GZ2 folder of a pack or a subfolder of it for specific textures.' -DialogDescription 'Select the source folder.' -InputPrompt 'Source folder path'
 
-        if ($NoUI -and [string]::IsNullOrWhiteSpace($destinationInput)) {
-            Write-Host ''
+            if ($NoUI -and [string]::IsNullOrWhiteSpace($destinationInput)) {
+                Write-Host ''
+            }
         }
-    }
-    else {
-        $sourceFolder = Resolve-FolderPathFromInput -Path $sourceInput -Label 'Source'
-        Write-Host "Selected source folder from parameter: $sourceFolder"
+        else {
+            $sourceFolder = Resolve-FolderPathFromInput -Path $sourceInput -Label 'Source'
+            Write-Host "Selected source folder from parameter: $sourceFolder"
+        }
     }
 
     if ([string]::IsNullOrWhiteSpace($destinationInput)) {
@@ -1053,7 +1063,7 @@ while ($true) {
         Write-Host "Selected destination folder from parameter: $targetFolder"
     }
 
-    if ($sourceFolder -ne $targetFolder) {
+    if ($patchMode -or $sourceFolder -ne $targetFolder) {
         break
     }
 
@@ -1071,18 +1081,20 @@ while ($true) {
     $destinationInput = $null
 }
 
-Write-Host ''
-Write-Host "Scanning source folder: $sourceFolder"
-$allSourceFiles = @(Get-ChildItem -LiteralPath $sourceFolder -File -Recurse)
-$sourceFiles = @(
-    $allSourceFiles | Where-Object { $_.Name -notin $excludedFileNames }
-)
-$excludedSourceFiles = @(
-    $allSourceFiles | Where-Object { $_.Name -in $excludedFileNames }
-)
+if (-not $patchMode) {
+    Write-Host ''
+    Write-Host "Scanning source folder: $sourceFolder"
+    $allSourceFiles = @(Get-ChildItem -LiteralPath $sourceFolder -File -Recurse)
+    $sourceFiles = @(
+        $allSourceFiles | Where-Object { $_.Name -notin $excludedFileNames }
+    )
+    $excludedSourceFiles = @(
+        $allSourceFiles | Where-Object { $_.Name -in $excludedFileNames }
+    )
 
-if ($excludedSourceFiles.Count -gt 0) {
-    Write-Host "Excluded $($excludedSourceFiles.Count) source file(s) by configured filename exclusions."
+    if ($excludedSourceFiles.Count -gt 0) {
+        Write-Host "Excluded $($excludedSourceFiles.Count) source file(s) by configured filename exclusions."
+    }
 }
 
 Write-Host ''
@@ -1090,7 +1102,10 @@ Write-Host "Scanning target folder: $targetFolder"
 $targetFiles = @(Get-ChildItem -LiteralPath $targetFolder -File -Recurse)
 
 # Switch to actually call the proper mode with all finalized parameters based on mode selection if source textures were actually found. Skips if no source textures found so it can still apply fixes if needed.
-if ($sourceFiles.Count -eq 0) {
+if ($patchMode) {
+    Write-Host 'Patch mode selected. Skipping merge operations and checking destination for known fixes.'
+}
+elseif ($sourceFiles.Count -eq 0) {
     Write-Warning 'No source files were found. Nothing to merge.'
 }
 else {

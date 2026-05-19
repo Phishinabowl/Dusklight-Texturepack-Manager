@@ -327,6 +327,19 @@ function Get-FixedMapFileName {
     return ($parts -join '_')
 }
 
+function Get-NormalizedFileName {
+    param(
+        [Parameter(Mandatory)]
+        [string]$FileName
+    )
+
+    if ($FileName -in $knownBadMapFileNames) {
+        return Get-FixedMapFileName -FileName $FileName
+    }
+
+    return $FileName
+}
+
 function Invoke-KnownBadMapFileFixIfRequested {
     param(
         [Parameter(Mandatory)]
@@ -401,12 +414,13 @@ function Get-ReplacementMatchKey {
     )
 
     $extension = $File.Extension.ToLowerInvariant()
+    $normalizedFileName = Get-NormalizedFileName -FileName $File.Name
 
     if ($extension -eq '.dds' -or $extension -eq '.png') {
-        return [System.IO.Path]::GetFileNameWithoutExtension($File.Name)
+        return [System.IO.Path]::GetFileNameWithoutExtension($normalizedFileName)
     }
 
-    return $File.Name
+    return $normalizedFileName
 }
 
 function Test-DdsOrPngFile {
@@ -492,7 +506,7 @@ function Get-ReplacementDestinationPath {
 
     if ($sourceIsTexture -and $targetIsTexture -and $SourceFile.Extension -ne $TargetFile.Extension) {
         $targetFolder = Split-Path -Path $TargetFile.FullName -Parent
-        return Join-Path -Path $targetFolder -ChildPath $SourceFile.Name
+        return Join-Path -Path $targetFolder -ChildPath (Get-NormalizedFileName -FileName $SourceFile.Name)
     }
 
     return $TargetFile.FullName
@@ -519,9 +533,10 @@ function ConvertTo-ImportedRelativePath {
 
     $fileName = [System.IO.Path]::GetFileName($RelativePath)
     $folderPath = [System.IO.Path]::GetDirectoryName($RelativePath)
+    $normalizedFileName = Get-NormalizedFileName -FileName $fileName
 
     if ([string]::IsNullOrWhiteSpace($folderPath)) {
-        return $fileName
+        return $normalizedFileName
     }
 
     $importedSegments = @(
@@ -531,7 +546,7 @@ function ConvertTo-ImportedRelativePath {
     )
 
     $importedFolderPath = [System.IO.Path]::Combine([string[]]$importedSegments)
-    return Join-Path -Path $importedFolderPath -ChildPath $fileName
+    return Join-Path -Path $importedFolderPath -ChildPath $normalizedFileName
 }
 
 function Get-ImportedDestinationPath {
@@ -564,8 +579,15 @@ function Get-ExtrasDestinationPath {
     )
 
     $relativePath = Get-RelativePathFromFolder -BaseFolder $SourceFolder -FullPath $SourceFile.FullName
+    $relativeFolder = [System.IO.Path]::GetDirectoryName($relativePath)
+    $normalizedFileName = Get-NormalizedFileName -FileName $SourceFile.Name
     $extrasFolder = Join-Path -Path $TargetFolder -ChildPath 'Extras-Imported'
-    return Join-Path -Path $extrasFolder -ChildPath $relativePath
+
+    if ([string]::IsNullOrWhiteSpace($relativeFolder)) {
+        return Join-Path -Path $extrasFolder -ChildPath $normalizedFileName
+    }
+
+    return Join-Path -Path (Join-Path -Path $extrasFolder -ChildPath $relativeFolder) -ChildPath $normalizedFileName
 }
 
 function New-PlannedCopy {

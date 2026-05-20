@@ -20,12 +20,24 @@ It currently supports:
 - DDS/PNG base-name matching/replacement when detected
 - Loose texture files copied into `Extras-Imported` folder
 - Known filename fixes/deletions for specific bad map texture names and Ganon fight crash
+- Intelligent exclusion for incorrect "4K" text textures on title screen from Henriko 1080p pack during import
 - Optional closing of File Explorer windows open inside the destination folder before applying changes (good for preventing accidental file/folder locking issues due to overwrites)
 - Preview and explicit `YES` confirmation before file operations
 - Proper error catching/handling for clean exits/re-prompts where needed
 - Advanced user terminal switches for running script in more efficient way
 
 ## How-To Use:
+### How-To Video:
+- There's a video by community member TheeJordanAvery which goes over texture and model replacement both manually and using this script. I'll be making a video later myself going over the script itself in detail specifically but for now, huge thanks to Jordan for making a how-to so quickly: https://www.youtube.com/watch?v=QCxksUVozhA
+
+### TL:DR
+- Download/unzip script to whatever folder you want
+- Shift+right click empty space in folder where script is and do "Open Powershell Window Here"
+- Run following commands in sequence:
+  - set-executionpolicy bypass -scope process
+  - .\texturepack-manager.ps1
+- Follow prompts in script
+
 ### Initial Safety Notice
 - This script is unsigned (I don't have the resources to get a signing cert myself right now) so by default, it won't run on most PC's as unsigned script execution is disabled. To get around this, the following command will TEMPORARILY allow unsigned scripts for the current powershell window/session you open to run the script. Run below commmand once you first open powershell and confirm prompt. Again this will only be for THIS session, you're not lowering security on your PC permanently with this.
   - set-executionpolicy bypass -scope process

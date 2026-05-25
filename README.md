@@ -28,24 +28,16 @@ It currently supports:
 
 ## How-To Use:
 ### How-To Video:
+- Note: Launching script has been simplified now so the complicated part Jordan shows at first with manually typing commands has been replaced with a one-click launcher
 - There's a video by community member TheeJordanAvery which goes over texture and model replacement both manually and using this script. I'll be making a video later myself going over the script itself in detail specifically but for now, huge thanks to Jordan for making a how-to so quickly: https://www.youtube.com/watch?v=QCxksUVozhA
 
 ### TL:DR
 - Download/unzip script to whatever folder you want
-- Shift+right click empty space in folder where script is and do "Open Powershell Window Here"
-- Run following commands in sequence:
-  - set-executionpolicy bypass -scope process
-  - .\texturepack-manager.ps1
+- Double-click "Run-Texturepack-Manager.bat" to start script
 - Follow prompts in script
 
-### Initial Safety Notice
-- This script is unsigned (I don't have the resources to get a signing cert myself right now) so by default, it won't run on most PC's as unsigned script execution is disabled. To get around this, the following command will TEMPORARILY allow unsigned scripts for the current powershell window/session you open to run the script. Run below commmand once you first open powershell and confirm prompt. Again this will only be for THIS session, you're not lowering security on your PC permanently with this.
-  - set-executionpolicy bypass -scope process
-
-### CD to Script Location and Run
-- Change directory to whatever folder you put the script in and then execute it with the following commands in sequence. For advanced users, terminal switches are listed at end of guide
-  - CD "[path to folder with script]"
-  - .\Texturepack-Manager.ps1
+### Safety Notice
+- This script is unsigned (I don't have the resources to get a signing cert myself right now) so by default, it won't run on most PC's as unsigned script execution is disabled. To get around this, the batch launcher TEMPORARILY allows unsigned scripts for the current powershell window/session when it runs. This will only be for THIS session, you're not lowering security on your PC permanently with this.
 
 ### Script Execution
 - Script will first prompt for mode. Select from 3 available options:
